@@ -1,5 +1,6 @@
 # app.py
-from flask import Flask, request, jsonify, render_template
+import json
+from flask import Flask, request, jsonify
 import boto3
 from itertools import cycle
 from threading import Thread
@@ -64,16 +65,43 @@ def scaler_thread():
             pool = cycle(list_ip)
             print(list_ip)
 
-        for instance in instances:
-            print(get_cpu_utilization(instance.instance_id)/0.5*100)
-            # if above threshold
-            # scale up - call https://khmwesl75f.execute-api.us-east-2.amazonaws.com/default/addInstance
+        max_cpu_utilization = 0
+        last_instance_id = ""
 
-            # if below threshold
+        for instance in instances:
+            max_cpu_utilization = get_cpu_utilization(
+                instance.instance_id)/0.5*100
+            last_instance_id = instance.instance_id
+
+        print("max", max_cpu_utilization)
+        # if above threshold
+        if max_cpu_utilization > 70:
+            url = "https://khmwesl75f.execute-api.us-east-2.amazonaws.com/default/addInstance"
+            # scale up
+            response = requests.request("POST", url)
+            print("added new instance")
+
+        # if below threshold
+        elif max_cpu_utilization < 40:
             # if length of list_ip > 2
-            # remove last item from list
-            # reinitialize circular list
-            # scale down - send https://y7nwunkj3a.execute-api.us-east-2.amazonaws.com/default/deleteInstance {instanceId: instance.instance_id}
+            if(len(list_ip) > 2):
+                # remove last item from list
+                del list_ip[-1]
+                # reinitialize circular list
+                pool = cycle(list_ip)
+                # scale down
+                url = "https://y7nwunkj3a.execute-api.us-east-2.amazonaws.com/default/deleteInstance"
+
+                payload = json.dumps({
+                    "instanceId": last_instance_id
+                })
+                headers = {
+                    'Content-Type': 'application/json'
+                }
+                response = requests.request(
+                    "POST", url, headers=headers, data=payload)
+
+                print("removed instance ", last_instance_id)
 
         time.sleep(600)
 
@@ -87,7 +115,7 @@ def next_instance():
 
 
 @app.route("/getUser", methods=["POST"])
-def login():
+def getUser():
     next_server_ip = next_instance()
     url = "http://{0}/getUser".format(next_server_ip)
     headers = {
@@ -106,40 +134,43 @@ def login():
     headers = {
         'Content-Type': 'application/json'
     }
-
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
+    print(next_server_ip, response.text)
     return response.text
 
 
 @app.route("/createUser", methods=["POST"])
-def login():
+def logcreateUserin():
     next_server_ip = next_instance()
     url = "http://{0}/createUser".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
     }
-
+    print(request.json)
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
+    print(response.text)
     return response.text
 
 
 @app.route("/getUserPrefs", methods=["POST"])
-def login():
-    next_server_ip = next_instance()
-    url = "http://{0}/getUserPrefs".format(next_server_ip)
+def getUserPrefs():
+    url = "http://13.59.12.240/getUserPrefs"
+
+    payload = json.dumps({
+        "userid": 298926916172251650
+    })
     headers = {
         'Content-Type': 'application/json'
     }
 
-    response = requests.request(
-        "POST", url, headers=headers, data=request.json)
+    response = requests.request("POST", url, headers=headers, data=payload)
     return response.text
 
 
 @app.route("/insertUserPrefs", methods=["POST"])
-def login():
+def insertUserPrefs():
     next_server_ip = next_instance()
     url = "http://{0}/insertUserPrefs".format(next_server_ip)
     headers = {
