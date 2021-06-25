@@ -1,4 +1,4 @@
-# cu.py
+# newlb.py
 import json
 from flask import Flask, request, jsonify
 import boto3
@@ -18,6 +18,11 @@ list_ip = []
 # Dictionary to store cpu usage of each ip
 list_cpu_usage = {}
 
+# Dictionary to store total task weight of each ip
+list_task_weight = {}
+
+# Dictionary to store total weightxcpu amount of load of each ip
+list_overall_load = {}
 
 # Start a AWS session
 session = boto3.Session(
@@ -57,6 +62,10 @@ def get_cpu_utilization(id):
     return response['Datapoints'][0]['Maximum']
 
 
+def get_overall_load(weight, cpu_usage):
+    return weight * cpu_usage
+
+
 def LC_next_instance():
     print()
 
@@ -75,7 +84,7 @@ def LC_delete_scheduler(last_id):
     print("removed instance ", last_id)
 
 
-def cpu_usage():
+def load_weight_thread():
     while True:
         instances = ec2.instances.filter(
             Filters=[{'Name': 'instance-state-name', 'Values': ['running']}])
@@ -85,8 +94,15 @@ def cpu_usage():
         # add update circular list
         if len(list_ip) is not len(instance_list):
             list_ip.clear()
+            list_cpu_usage.clear()
+            list_task_weight.clear()
+            list_overall_load.clear()
+
             for instance in instances:
                 list_ip.append(instance.public_ip_address)
+                if instance.public_ip_address not in list_overall_load:
+                    list_task_weight[instance.public_ip_address] = 0
+                    list_overall_load[instance.public_ip_address] = 0
 
             print(list_ip)
 
@@ -100,6 +116,9 @@ def cpu_usage():
                 max_cpu_utilization = current_cpu_utilization
             last_instance_id = instance.instance_id
             list_cpu_usage[instance.public_ip_address] = current_cpu_utilization
+
+            list_overall_load[instance.public_ip_address] = get_overall_load(
+                list_task_weight[instance.public_ip_address], list_cpu_usage[instance.public_ip_address])
 
         #print("max", max_cpu_utilization)
         # if above threshold
@@ -115,7 +134,9 @@ def cpu_usage():
             if(len(list_ip) > 2):
                 # remove last item from list
                 del list_ip[-1]
+                list_overall_load.pop(last_instance_id)
                 list_cpu_usage.pop(last_instance_id)
+                list_task_weight.pop(last_instance_id)
 
                 # Set up scheduler with 0 delay
                 s = sched.scheduler(time.localtime, 0)
@@ -127,25 +148,26 @@ def cpu_usage():
         time.sleep(5)
 
 
-t = Thread(target=cpu_usage)
+t = Thread(target=load_weight_thread)
 t.daemon = True
 t.start()
 
 
 def next_instance():
-    lowest_cpu_usage_ip = list(list_cpu_usage.keys())[0]
-    lowest_cpu_usage = list(list_cpu_usage.values())[0]
+    least_overall_load_ip = list(list_overall_load.keys())[0]
+    least_overall_load = list(list_overall_load.values())[0]
 
-    for key in list_cpu_usage:
-        if lowest_cpu_usage > list_cpu_usage[key]:
-            lowest_cpu_usage = list_cpu_usage[key]
-            lowest_cpu_usage_ip = key
-    return lowest_cpu_usage_ip
+    for key in list_overall_load:
+        if least_overall_load > list_overall_load[key]:
+            least_overall_load = list_overall_load[key]
+            least_overall_load_ip = key
+    return least_overall_load_ip
 
 
 @app.route("/getUser", methods=["POST"])
 def getUser():
     next_server_ip = next_instance()
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] + 1
     url = "http://{0}/getUser".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
@@ -153,12 +175,14 @@ def getUser():
 
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] - 1
     return response.text
 
 
 @app.route("/login", methods=["POST"])
 def login():
     next_server_ip = next_instance()
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] + 1
     url = "http://{0}/login".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
@@ -166,12 +190,14 @@ def login():
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
     print(next_server_ip, response.text)
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] + 1
     return response.text
 
 
 @app.route("/createUser", methods=["POST"])
 def logcreateUserin():
     next_server_ip = next_instance()
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] + 3
     url = "http://{0}/createUser".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
@@ -180,6 +206,7 @@ def logcreateUserin():
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
     print(response.text)
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] - 3
     return response.text
 
 
@@ -201,6 +228,7 @@ def getUserPrefs():
 @app.route("/insertUserPrefs", methods=["POST"])
 def insertUserPrefs():
     next_server_ip = next_instance()
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] + 2
     url = "http://{0}/insertUserPrefs".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
@@ -208,6 +236,7 @@ def insertUserPrefs():
 
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
+    list_task_weight[next_server_ip] = list_task_weight[next_server_ip] - 2
     return response.text
 
 

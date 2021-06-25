@@ -4,7 +4,8 @@ from flask import Flask, request, jsonify
 import boto3
 from itertools import cycle
 from threading import Thread
-import time,sched
+import time
+import sched
 import requests
 from datetime import datetime, timedelta
 
@@ -29,6 +30,7 @@ ec2 = session.resource('ec2')
 # Create CloudWatch client
 cloudwatch = session.client('cloudwatch')
 
+
 def get_cpu_utilization(id):
     response = cloudwatch.get_metric_statistics(
         Namespace='AWS/EC2',
@@ -52,8 +54,10 @@ def get_cpu_utilization(id):
         return 0
     return response['Datapoints'][0]['Maximum']
 
+
 def LC_next_instance():
     print()
+
 
 def LC_delete_scheduler(last_id):
     # scale down
@@ -79,6 +83,8 @@ def least_connection():
         # add update circular list
         if len(list_ip) is not len(instance_list):
             list_ip.clear()
+            taskManager.clear()
+
             for instance in instances:
                 list_ip.append(instance.public_ip_address)
                 if instance.public_ip_address not in taskManager:
@@ -121,12 +127,14 @@ def least_connection():
 
         time.sleep(5)
 
+
 t = Thread(target=least_connection)
-t.daemon=True
+t.daemon = True
 t.start()
 
+
 def next_instance():
-    leastTask = list(taskManager.keys())[0]
+    leastTask = list(taskManager.values())[0]
     leastInstanceIP = ""
     for key in taskManager:
         print(taskManager[key])
@@ -134,6 +142,7 @@ def next_instance():
             leastTask = taskManager[key]
             leastInstanceIP = key
     return leastInstanceIP
+
 
 @app.route("/getUser", methods=["POST"])
 def getUser():
@@ -146,7 +155,7 @@ def getUser():
 
     response = requests.request(
         "POST", url, headers=headers, data=request.json)
-    taskManager[next_server_ip] = taskManager[next_server_ip] - 1    
+    taskManager[next_server_ip] = taskManager[next_server_ip] - 1
     return response.text
 
 
@@ -199,7 +208,7 @@ def getUserPrefs():
 @app.route("/insertUserPrefs", methods=["POST"])
 def insertUserPrefs():
     next_server_ip = next_instance()
-    taskManager[next_server_ip] = taskManager[next_server_ip]  + 1
+    taskManager[next_server_ip] = taskManager[next_server_ip] + 1
     url = "http://{0}/insertUserPrefs".format(next_server_ip)
     headers = {
         'Content-Type': 'application/json'
@@ -209,6 +218,7 @@ def insertUserPrefs():
         "POST", url, headers=headers, data=request.json)
     taskManager[next_server_ip] = taskManager[next_server_ip] - 1
     return response.text
+
 
 if __name__ == "__main__":
     # Threaded option to enable multiple instances for multiple user access support
